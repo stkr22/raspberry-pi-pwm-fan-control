@@ -1,7 +1,7 @@
 FROM fedora:latest
 
 RUN  dnf -y update
-RUN  dnf -y install libgpiod-utils python3-libgpiod swig python2 python2-setuptools python-setuptools python-devel python3-devel python-setuptools python3-setuptools unzip curl wget make gcc which
+RUN  dnf -y install libgpiod-utils python3-libgpiod swig python-setuptools python-devel python3-devel python-setuptools python3-setuptools unzip curl wget make gcc which
 
 RUN  mkdir -p /tmp; \
      wget https://github.com/joan2937/lg/archive/master.zip;  \
