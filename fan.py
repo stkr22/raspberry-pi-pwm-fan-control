@@ -1,17 +1,28 @@
 #!/usr/bin/python
 
 # python modules
-import lgpio as sbc
+import lgpio
 import time
-import signal
 import sys
-import os
 import sys, getopt
+import psutil
+import logging
+import sys
+
+
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
 # Configuration
 PWM_GPIO_NR = 18        # PWM gpio number used to drive PWM fan (gpio18 = pin 12)
-WAIT_TIME = 1           # [s] Time to wait between each refresh
-PWM_FREQ = 10000        # [Hz] 10kHz for Noctua PWM control
+WAIT_TIME = 2           # [s] Time to wait between each refresh
+PWM_FREQ = 50        # [Hz] 10kHz for Noctua PWM control
 
 # Configurable temperature and fan speed
 MIN_TEMP = 40
@@ -22,7 +33,7 @@ FAN_OFF = 0
 FAN_MAX = 100
 
 # logging and metrics (enable = 1)
-VERBOSE = 0
+VERBOSE = 1
 NODE_EXPORTER = 0
 
 # parse input arguments
@@ -53,85 +64,102 @@ for opt, arg in opts:
       PWM_FREQ = int(arg)
    elif opt in ("--node-exporter"):
       NODE_EXPORTER = 1
-print("")
-print("MIN_TEMP:",MIN_TEMP)
-print("MAX_TEMP:",MAX_TEMP)
-print("FAN_LOW:",FAN_LOW)
-print("FAN_HIGH:",FAN_HIGH)
-print("WAIT_TIME:",WAIT_TIME)
-print("PWM_GPIO_NR:",PWM_GPIO_NR)
-print("PWM_FREQ:",PWM_FREQ)
-print("VERBOSE:",VERBOSE)
-print("NODE_EXPORTER:",NODE_EXPORTER)
-print("")
 
-# Get CPU's temperature
-def getCpuTemperature():
-    res = os.popen('cat /sys/devices/virtual/thermal/thermal_zone0/temp').readline()
-    temp = (float(res)/1000)
-    return temp
+logger.info("Starting service with min_temp %s to max_temp %s. Set fan_low %s to fan_high %s. Waiting %s. Using GPIO_PIN %s with frequency %s", MIN_TEMP, MAX_TEMP, FAN_LOW, FAN_HIGH, WAIT_TIME, PWM_GPIO_NR, PWM_FREQ)
 
-# Set fan speed
-def setFanSpeed(speed,temp):
-    sbc.tx_pwm(fan , PWM_GPIO_NR, PWM_FREQ, speed, pulse_offset=0, pulse_cycles=0)
 
-    # print fan speed and temperature
-    if VERBOSE == 1:
-        print("fan speed: ",int(speed),"    temp: ",temp)
+def get_cpu_temperature() -> int:
+   """Get CPU temparature.
 
-    # write fan metrics to file for node-exporter/prometheus
-    if NODE_EXPORTER == 1:
-        # Save a reference to the original standard output
-        original_stdout = sys.stdout 
-        with open('/var/lib/node_exporter/fan-metrics.prom', 'w') as f:
-            # Change the standard output to the file we created.
-            sys.stdout = f 
-            print('raspberry_fan_speed ',speed)
-            print('raspberry_fan_temp ',temp)
-            print('raspberry_fan_min_temp ',MIN_TEMP)
-            print('raspberry_fan_max_temp ',MAX_TEMP)
-            print('raspberry_fan_fan_low ',FAN_LOW)
-            print('raspberry_fan_fan_high ',FAN_HIGH)
-            print('raspberry_fan_wait_time ',WAIT_TIME)
-            print('raspberry_fan_pwm_gpio ',PWM_GPIO_NR)
-            print('raspberry_fan_freq ',PWM_FREQ)
-            # Reset the standard output to its original value
-            sys.stdout = original_stdout
-            f.close()
+   Returns:
+       int: _description_
+   """
+   sensors = psutil.sensors_temperatures()['cpu_thermal']
+   return round(sensors[0].current)
 
-    return()
+def prometheus_exporter(speed: int, temp: int) -> None:
+   # Save a reference to the original standard output
+   original_stdout = sys.stdout 
+   with open('/var/lib/node_exporter/fan-metrics.prom', 'w') as f:
+      # Change the standard output to the file we created.
+      sys.stdout = f 
+      print('raspberry_fan_speed ',speed)
+      print('raspberry_fan_temp ',temp)
+      print('raspberry_fan_min_temp ',MIN_TEMP)
+      print('raspberry_fan_max_temp ',MAX_TEMP)
+      print('raspberry_fan_fan_low ',FAN_LOW)
+      print('raspberry_fan_fan_high ',FAN_HIGH)
+      print('raspberry_fan_wait_time ',WAIT_TIME)
+      print('raspberry_fan_pwm_gpio ',PWM_GPIO_NR)
+      print('raspberry_fan_freq ',PWM_FREQ)
+      # Reset the standard output to its original value
+      sys.stdout = original_stdout
+      f.close()
 
-# Handle fan speed
-def handleFanSpeed():
-    temp = getCpuTemperature()
+def set_fan_speed(speed: int, temp: int) -> None:
+   """Setting gpio fan speed.
 
-    # Turn off the fan if temperature is below MIN_TEMP
-    if temp < MIN_TEMP:
-        setFanSpeed(FAN_OFF,temp)
+   Args:
+       speed (int): _description_
+       temp (int): _description_
+   """
+   lgpio.tx_pwm(
+      fan,
+      PWM_GPIO_NR,
+      PWM_FREQ,
+      speed,
+      pulse_offset=0,
+      pulse_cycles=0
+   )
 
-    # Set fan speed to MAXIMUM if the temperature is above MAX_TEMP
-    elif temp > MAX_TEMP:
-        setFanSpeed(FAN_MAX,temp)
+   # print fan speed and temperature
+   if VERBOSE == 1:
+      logger.info("fan speed: %s\ntemp: %s", speed, temp)
+   # write fan metrics to file for node-exporter/prometheus
+   if NODE_EXPORTER == 1:
+      prometheus_exporter(speed, temp)
 
-    # Caculate dynamic fan speed
-    else:
-        step = (FAN_HIGH - FAN_LOW)/(MAX_TEMP - MIN_TEMP)   
-        delta = temp - MIN_TEMP
-        speed = FAN_LOW + ( round(delta) * step )
-        setFanSpeed(speed,temp)
+def calculate_dynamic_speed(temp: int) -> int:
+   """Calculate dynamic fan speed based on temperature.
 
-    return ()
+   Args:
+       temp (int): _description_
+
+   Returns:
+       int: _description_
+   """
+   step = (FAN_HIGH - FAN_LOW)/(MAX_TEMP - MIN_TEMP)   
+   delta = temp - MIN_TEMP
+   return FAN_LOW + ( round(delta) * step )
+
+def handle_fan_speed() -> None:
+   """Handle fan speed
+   """
+   temp = get_cpu_temperature()
+
+   # Turn off the fan if temperature is below MIN_TEMP
+   if temp < MIN_TEMP:
+      set_fan_speed(FAN_OFF,temp)
+
+   # Set fan speed to MAXIMUM if the temperature is above MAX_TEMP
+   elif temp > MAX_TEMP:
+      set_fan_speed(FAN_MAX,temp)
+
+   # Caculate dynamic fan speed
+   else:
+      set_fan_speed(calculate_dynamic_speed(temp), temp)
+
 
 try:
-    # Setup GPIO pin
-    fan = sbc.gpiochip_open(0)
-    sbc.gpio_claim_output(fan, PWM_GPIO_NR)
-    setFanSpeed(FAN_LOW,MIN_TEMP)
+   # Setup GPIO pin
+   fan = lgpio.gpiochip_open(0)
+   lgpio.gpio_claim_output(fan, PWM_GPIO_NR)
+   set_fan_speed(FAN_LOW,MIN_TEMP)
 
-    # Handle fan speed every WAIT_TIME sec
-    while True:
-        handleFanSpeed()
-        time.sleep(WAIT_TIME)
+   # Handle fan speed every WAIT_TIME sec
+   while True:
+      handle_fan_speed()
+      time.sleep(WAIT_TIME)
 
 except KeyboardInterrupt: # trap a CTRL+C keyboard interrupt
-    setFanSpeed(FAN_LOW,MIN_TEMP)
+   set_fan_speed(FAN_LOW,MIN_TEMP)
