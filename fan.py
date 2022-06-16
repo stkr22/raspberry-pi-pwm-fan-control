@@ -1,13 +1,10 @@
 #!/usr/bin/python
 
-# python modules
-import lgpio
-import time
-import sys
 import sys, getopt
-import psutil
 import logging
-import sys
+import time
+import lgpio
+import psutil
 
 
 logger = logging.getLogger()
@@ -21,7 +18,7 @@ logger.addHandler(handler)
 
 # Configuration
 PWM_GPIO_NR = 18        # PWM gpio number used to drive PWM fan (gpio18 = pin 12)
-WAIT_TIME = 2           # [s] Time to wait between each refresh
+WAIT_TIME = -1       # script mode - for interval mode values > 0 are treated as seconds
 PWM_FREQ = 50        # [Hz] 10kHz for Noctua PWM control
 
 # Configurable temperature and fan speed
@@ -149,17 +146,18 @@ def handle_fan_speed() -> None:
    else:
       set_fan_speed(calculate_dynamic_speed(temp), temp)
 
-
-try:
-   # Setup GPIO pin
+def start_fan_control() -> None:
    fan = lgpio.gpiochip_open(0)
    lgpio.gpio_claim_output(fan, PWM_GPIO_NR)
    set_fan_speed(FAN_LOW,MIN_TEMP)
 
    # Handle fan speed every WAIT_TIME sec
-   while True:
+   if WAIT_TIME < 1:
       handle_fan_speed()
-      time.sleep(WAIT_TIME)
+   else:
+      while True:
+         handle_fan_speed()
+         time.sleep(WAIT_TIME)
 
-except KeyboardInterrupt: # trap a CTRL+C keyboard interrupt
-   set_fan_speed(FAN_LOW,MIN_TEMP)
+if __name__ == '__main__':
+   start_fan_control()
