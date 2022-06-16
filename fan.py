@@ -93,7 +93,7 @@ def prometheus_exporter(speed: int, temp: int) -> None:
       sys.stdout = original_stdout
       f.close()
 
-def set_fan_speed(speed: int, temp: int) -> None:
+def set_fan_speed(fan, speed: int, temp: int) -> None:
    """Setting gpio fan speed.
 
    Args:
@@ -129,22 +129,22 @@ def calculate_dynamic_speed(temp: int) -> int:
    delta = temp - MIN_TEMP
    return FAN_LOW + ( round(delta) * step )
 
-def handle_fan_speed() -> None:
+def handle_fan_speed(fan) -> None:
    """Handle fan speed
    """
    temp = get_cpu_temperature()
 
    # Turn off the fan if temperature is below MIN_TEMP
    if temp < MIN_TEMP:
-      set_fan_speed(FAN_OFF,temp)
+      set_fan_speed(fan, FAN_OFF,temp)
 
    # Set fan speed to MAXIMUM if the temperature is above MAX_TEMP
    elif temp > MAX_TEMP:
-      set_fan_speed(FAN_MAX,temp)
+      set_fan_speed(fan, FAN_MAX,temp)
 
    # Caculate dynamic fan speed
    else:
-      set_fan_speed(calculate_dynamic_speed(temp), temp)
+      set_fan_speed(fan, calculate_dynamic_speed(temp), temp)
 
 def start_fan_control() -> None:
    fan = lgpio.gpiochip_open(0)
@@ -153,10 +153,10 @@ def start_fan_control() -> None:
 
    # Handle fan speed every WAIT_TIME sec
    if WAIT_TIME < 1:
-      handle_fan_speed()
+      handle_fan_speed(fan)
    else:
       while True:
-         handle_fan_speed()
+         handle_fan_speed(fan)
          time.sleep(WAIT_TIME)
 
 if __name__ == '__main__':
