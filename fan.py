@@ -149,7 +149,6 @@ def handle_fan_speed(fan) -> None:
 def start_fan_control() -> None:
    fan = lgpio.gpiochip_open(0)
    lgpio.gpio_claim_output(fan, PWM_GPIO_NR)
-   set_fan_speed(FAN_LOW,MIN_TEMP)
 
    # Handle fan speed every WAIT_TIME sec
    if WAIT_TIME < 1:
